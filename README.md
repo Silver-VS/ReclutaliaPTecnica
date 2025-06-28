@@ -22,10 +22,10 @@ Implementar un backend en Java que proporcione:
 - **Control de versiones y CI/CD**: GitHub
 - **IDE**: IntelliJ IDEA
 - **Base de datos**: MySQL 8.x
-- **Lenguaje y build**: Java 17, Maven
+- **Lenguaje y build**: Java 21, Maven
 - **Concurrencia**: `ExecutorService` de Java
 - **AWS**: RDS MySQL, Secrets Manager, Lambda, API Gateway
-- **Serialización JSON**: Gson (o similar)
+- **Serialización JSON**: Jackson
 - **Pruebas**: Postman y cURL
 - **Gestión de dependencias**: GitHub Actions para compilación y pruebas automatizadas
 - **Control de calidad**: Análisis estático con IntelliJ IDEA Inspections

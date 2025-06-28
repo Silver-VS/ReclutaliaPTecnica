@@ -1,193 +1,162 @@
-/*
- * Employee.java
- * ---------------------------------------------------------------------------
- * Copyright © 2025 Silver VS
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
- * ---------------------------------------------------------------------------
- */
-
 package model;
 
 import java.math.BigDecimal;
-import java.sql.Timestamp;
+import java.time.LocalDate;
 
 /**
- * Representa un empleado con sus datos básicos y timestamps de auditoría.
+ * Representa un empleado de la organización.
+ * <p>
+ * Incluye información de identificación, rol, departamento,
+ * fecha de contratación, salario y trazabilidad de creación/actualización.
+ * </p>
  *
  * @author Silver VS
  * @version 1.0
- * @since 2025-06-26
+ * @since 2025-06-27
  */
 public class Employee {
+
+    /** Identificador único del empleado (clave primaria). */
     private int id;
-    private String firstName;
-    private String lastName;
-    private String email;
+
+    /** Nombre completo del empleado. */
+    private String name;
+
+    /** Puesto o rol que desempeña el empleado. */
+    private String position;
+
+    /** Departamento al que pertenece el empleado. */
+    private String department;
+
+    /** Fecha en que fue contratado el empleado. */
+    private LocalDate hire_date;
+
+    /** Salario actual del empleado. */
     private BigDecimal salary;
-    private Timestamp createdAt;
-    private Timestamp updatedAt;
 
     /**
-     * Constructor vacío para uso de frameworks y DAO.
+     * Constructor vacío (requerido por algunos frameworks de serialización).
      */
     public Employee() {
+        // Intentionally empty.
     }
 
     /**
-     * Constructor para creación de nuevo empleado.
+     * Constructor para creación de un nuevo empleado.
      *
-     * @param firstName nombre del empleado
-     * @param lastName  apellido del empleado
-     * @param email     correo electrónico
-     * @param salary    salario del empleado
+     * @param name       Nombre completo
+     * @param position   Puesto o rol
+     * @param salary     Salario inicial
+     * @param hire_date   Fecha de contratación
+     * @param department Departamento asignado
      */
-    public Employee(String firstName, String lastName, String email, BigDecimal salary) {
-        this.firstName = firstName;
-        this.lastName = lastName;
-        this.email = email;
-        this.salary = salary;
+    public Employee(String name,
+                    String position,
+                    BigDecimal salary,
+                    LocalDate hire_date,
+                    String department
+    ) {
+        this.name       = name;
+        this.position   = position;
+        this.salary     = salary;
+        this.hire_date = hire_date;
+        this.department = department;
     }
 
     /**
-     * Obtiene el ID del empleado.
+     * Constructor completo con todos los campos.
      *
-     * @return identificador único asignado por la base de datos
+     * @param id          Identificador único
+     * @param name        Nombre completo
+     * @param position    Puesto o rol
+     * @param salary      Salario actual
+     * @param hire_date    Fecha de contratación
+     * @param department  Departamento asignado
      */
+    public Employee(int id,
+                    String name,
+                    String position,
+                    BigDecimal salary,
+                    LocalDate hire_date,
+                    String department) {
+        this.id          = id;
+        this.name        = name;
+        this.position    = position;
+        this.department  = department;
+        this.hire_date = hire_date;
+        this.salary      = salary;
+    }
+
+    /** @return identificador único del empleado */
     public int getId() {
         return id;
     }
 
-    /**
-     * Asigna el ID del empleado.
-     *
-     * @param id identificador único
-     */
+    /** @param id establece el identificador único del empleado */
     public void setId(int id) {
         this.id = id;
     }
 
-    /**
-     * Obtiene el nombre del empleado.
-     *
-     * @return nombre propio
-     */
-    public String getFirstName() {
-        return firstName;
+    /** @return nombre completo del empleado */
+    public String getName() {
+        return name;
     }
 
-    /**
-     * Asigna el nombre del empleado.
-     *
-     * @param firstName nombre propio
-     */
-    public void setFirstName(String firstName) {
-        this.firstName = firstName;
+    /** @param name establece el nombre completo del empleado */
+    public void setName(String name) {
+        this.name = name;
     }
 
-    /**
-     * Obtiene el apellido del empleado.
-     *
-     * @return apellido paterno o materno
-     */
-    public String getLastName() {
-        return lastName;
+    /** @return puesto o rol del empleado */
+    public String getPosition() {
+        return position;
     }
 
-    /**
-     * Asigna el apellido del empleado.
-     *
-     * @param lastName apellido paterno o materno
-     */
-    public void setLastName(String lastName) {
-        this.lastName = lastName;
+    /** @param position establece el puesto o rol del empleado */
+    public void setPosition(String position) {
+        this.position = position;
     }
 
-    /**
-     * Obtiene el correo electrónico del empleado.
-     *
-     * @return email único para contacto
-     */
-    public String getEmail() {
-        return email;
+    /** @return departamento al que pertenece el empleado */
+    public String getDepartment() {
+        return department;
     }
 
-    /**
-     * Asigna el correo electrónico del empleado.
-     *
-     * @param email dirección de correo única
-     */
-    public void setEmail(String email) {
-        this.email = email;
+    /** @param department establece el departamento del empleado */
+    public void setDepartment(String department) {
+        this.department = department;
     }
 
-    /**
-     * Obtiene el salario del empleado.
-     *
-     * @return salario en formato decimal
-     */
+    /** @return fecha de contratación */
+    public LocalDate getHire_date() {
+        return hire_date;
+    }
+
+    /** @param hire_date establece la fecha de contratación */
+    public void setHire_date(LocalDate hire_date) {
+        this.hire_date = hire_date;
+    }
+
+    /** @return salario actual del empleado */
     public BigDecimal getSalary() {
         return salary;
     }
 
-    /**
-     * Asigna el salario del empleado.
-     *
-     * @param salary salario en formato decimal
-     */
+    /** @param salary establece el salario del empleado */
     public void setSalary(BigDecimal salary) {
         this.salary = salary;
     }
 
-    /**
-     * Obtiene la fecha de creación del registro.
-     *
-     * @return timestamp de creación
-     */
-    public Timestamp getCreatedAt() {
-        return createdAt;
-    }
 
-    /**
-     * Asigna la fecha de creación del registro.
-     *
-     * @param createdAt timestamp de creación
-     */
-    public void setCreatedAt(Timestamp createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    /**
-     * Obtiene la fecha de la última actualización del registro.
-     *
-     * @return timestamp de última modificación
-     */
-    public Timestamp getUpdatedAt() {
-        return updatedAt;
-    }
-
-    /**
-     * Asigna la fecha de la última actualización del registro.
-     *
-     * @param updatedAt timestamp de última modificación
-     */
-    public void setUpdatedAt(Timestamp updatedAt) {
-        this.updatedAt = updatedAt;
+    @Override
+    public String toString() {
+        return "Employee{" +
+                "id=" + id +
+                ", name='" + name + '\'' +
+                ", position='" + position + '\'' +
+                ", department='" + department + '\'' +
+                ", hireDate=" + hire_date +
+                ", salary=" + salary +
+                '}';
     }
 }

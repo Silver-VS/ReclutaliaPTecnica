@@ -40,6 +40,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -83,13 +84,27 @@ public final class DatabaseConfig {
     public static DataSource getDataSource() {
         if (dataSource == null) {
             boolean forceAws = Boolean.parseBoolean(
-                    System.getenv().getOrDefault("USE_AWS_SECRETS", "false").trim()
+                    System.getenv().getOrDefault("USE_AWS_SECRETS",
+                            System.getProperty("USE_AWS_SECRETS", "false")
+                    ).trim()
             );
-            String url  = System.getenv("DB_URL");
-            String user = System.getenv("DB_USER");
-            String pass = System.getenv("DB_PASS");
 
-            if (forceAws || url == null || url.isBlank() || url.contains("localhost")) {
+            String urlEnv  = System.getenv("DB_URL");
+            String userEnv = System.getenv("DB_USER");
+            String passEnv = System.getenv("DB_PASS");
+
+            // Aquí leemos props si no están en env
+            String url  = (urlEnv  != null && !urlEnv.isBlank())
+                    ? urlEnv
+                    : System.getProperty("DB_URL");
+            String user = (userEnv != null && !userEnv.isBlank())
+                    ? userEnv
+                    : System.getProperty("DB_USER");
+            String pass = (passEnv != null && !passEnv.isBlank())
+                    ? passEnv
+                    : System.getProperty("DB_PASS");
+
+            if (forceAws || url == null || url.isBlank()) {
                 LOG.info(
                         forceAws
                                 ? "USE_AWS_SECRETS=true → obteniendo credenciales de AWS Secrets Manager"
@@ -101,7 +116,7 @@ public final class DatabaseConfig {
                 user = secret.get("DB_USER");
                 pass = secret.get("DB_PASS");
             } else {
-                LOG.info("Usando DB_URL de entorno: {}", url);
+                LOG.info("Usando DB_URL de entorno/prop: {}", url);
             }
 
             HikariConfig cfg = new HikariConfig();
@@ -128,34 +143,50 @@ public final class DatabaseConfig {
     private static Map<String, String> fetchSecretFromAWS() {
         String secretName = System.getenv()
                 .getOrDefault("AWS_SECRET_NAME", "employees/db/credentials");
-        LOG.debug("Fetching DB credentials from AWS Secret: {}", secretName);
-
         Region region = Region.of(
                 System.getenv().getOrDefault("AWS_REGION", "mx-central-1")
         );
 
+        Map<String,String> creds = new HashMap<>();
+
+        // 1. Crea el cliente de Secrets Manager
         try (SecretsManagerClient client = SecretsManagerClient.builder()
                 .region(region)
                 .build()) {
 
+            // 2. Prepara y ejecuta la petición
             GetSecretValueRequest getReq = GetSecretValueRequest.builder()
                     .secretId(secretName)
                     .build();
-
             GetSecretValueResponse getRes = client.getSecretValue(getReq);
-            String secretJson = getRes.secretString();
 
-            return new ObjectMapper().readValue(
+            // 3. Obtén el String JSON crudo
+            String secretJson = getRes.secretString();
+            LOG.debug("Secret JSON obtenido: {}", secretJson);
+
+            // 4. Parsealo y mapea a tus claves
+            Map<String,String> raw = new ObjectMapper().readValue(
                     secretJson,
-                    new TypeReference<>() {
-                    }
+                    new TypeReference<Map<String,String>>() {}
             );
 
+            creds.put("DB_URL",  raw.getOrDefault("DB_URL",
+                    raw.getOrDefault("host", "") + ":" +
+                            raw.getOrDefault("port", "3306") + "/" +
+                            raw.getOrDefault("dbname", "employees")));
+            creds.put("DB_USER", raw.getOrDefault("DB_USER",
+                    raw.getOrDefault("username", raw.get("user"))));
+            creds.put("DB_PASS", raw.getOrDefault("DB_PASS",
+                    raw.getOrDefault("password", raw.get("pass"))));
+
+            return creds;
+
         } catch (Exception e) {
-            LOG.error("Unable to load DB credentials from AWS", e);
-            throw new IllegalStateException("Unable to load DB credentials", e);
+            LOG.error("Error recuperando secret de AWS", e);
+            throw new IllegalStateException("No se pudieron cargar credenciales DB", e);
         }
     }
+
 
 
     /**
@@ -167,13 +198,27 @@ public final class DatabaseConfig {
     public static void verifySingleConnection() throws SQLException {
         // Resolve credentials same as getDataSource()
         boolean forceAws = Boolean.parseBoolean(
-                System.getenv().getOrDefault("USE_AWS_SECRETS", "false").trim()
+                System.getenv().getOrDefault("USE_AWS_SECRETS",
+                        System.getProperty("USE_AWS_SECRETS", "false")
+                ).trim()
         );
-        String url  = System.getenv("DB_URL");
-        String user = System.getenv("DB_USER");
-        String pass = System.getenv("DB_PASS");
 
-        if (forceAws || url == null || url.isBlank() || url.contains("localhost")) {
+        String urlEnv  = System.getenv("DB_URL");
+        String userEnv = System.getenv("DB_USER");
+        String passEnv = System.getenv("DB_PASS");
+
+        // Aquí leemos props si no están en env
+        String url  = (urlEnv  != null && !urlEnv.isBlank())
+                ? urlEnv
+                : System.getProperty("DB_URL");
+        String user = (userEnv != null && !userEnv.isBlank())
+                ? userEnv
+                : System.getProperty("DB_USER");
+        String pass = (passEnv != null && !passEnv.isBlank())
+                ? passEnv
+                : System.getProperty("DB_PASS");
+
+        if (forceAws || url == null || url.isBlank()) {
             Map<String,String> secret = fetchSecretFromAWS();
             url  = secret.get("DB_URL");
             user = secret.get("DB_USER");

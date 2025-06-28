@@ -1,199 +1,213 @@
-/*
- * EmployeeApiServer.java
- * ---------------------------------------------------------------------------
- * Copyright © 2025 Silver VS
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
- * ---------------------------------------------------------------------------
- */
 package api;
 
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.RequestStreamHandler;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import model.Employee;
-import model.EmployeeDAO;
 import model.EmployeeDAOImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import model.Employee;
 import service.EmployeeService;
 import service.EmployeeServiceImpl;
 
-import javax.sql.DataSource;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.Executors;
 
 /**
- * Servidor HTTP embebido que expone una API REST para gestión de empleados.
- *
- * <p>
- * - Realiza primero una verificación puntual de conexión con
- * {@code DatabaseConfig.verifySingleConnection()}.
- * - Configura y arranca un pool lazily con HikariCP.
- * - Registra peticiones y errores (stack trace) con SLF4J.
- * </p>
- *
- * @author Silver
- * @version 1.3
- * @since 2025-06-27
+ * AWS Lambda handler y arranque local para la API REST de empleados.
  */
-public class EmployeeApiServer {
+public class EmployeeApiServer implements RequestStreamHandler {
 
-    private static final Logger LOG = LoggerFactory.getLogger(EmployeeApiServer.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     private final EmployeeService service;
 
-    /**
-     * Construye el servidor con el servicio de negocio inyectado.
-     *
-     * @param service implementación de {@link EmployeeService}
-     */
+    // Constructor por defecto (producción / Lambda)
+    public EmployeeApiServer() {
+        this(new EmployeeServiceImpl(new EmployeeDAOImpl()));
+    }
+
+    // Constructor de inyección (por tests)
     public EmployeeApiServer(EmployeeService service) {
         this.service = service;
     }
 
-    /**
-     * Punto de entrada.
-     *
-     * @param args no usados
-     * @throws Exception si no puede iniciarse
-     */
-    public static void main(String[] args) throws Exception {
-        int port = Integer.parseInt(System.getenv().getOrDefault("SERVER_PORT", "8080").trim());
-        LOG.info("Arrancando servidor en puerto {}", port);
 
-        // Prueba puntual sin pool
+
+    @Override
+    public void handleRequest(InputStream input, OutputStream output, Context context) throws IOException {
+        APIGatewayProxyResponseEvent response;
         try {
-            config.DatabaseConfig.verifySingleConnection();
-        } catch (Exception ex) {
-            LOG.error("✖ Prueba puntual fallida: {}", ex.getMessage(), ex);
-        }
-
-        DataSource ds = config.DatabaseConfig.getDataSource();
-        EmployeeDAO dao = new EmployeeDAOImpl(ds);
-        EmployeeService svc = new EmployeeServiceImpl(dao);
-
-        new EmployeeApiServer(svc).start(port);
-    }
-
-    /**
-     * Inicia el servidor HTTP en el puerto dado y registra contextos.
-     *
-     * @param port puerto para HTTP
-     * @throws Exception si falla al crear o arrancar
-     */
-    public void start(int port) throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        LOG.info("Servidor HTTP iniciado en el puerto {}", port);
-
-        server.createContext("/employees", new EmployeesHandler());
-        server.createContext("/employees/salary/top", new TopSalaryHandler());
-
-        server.setExecutor(null);
-        server.start();
-        LOG.info("Contextos registrados: /employees, /employees/salary/top");
-    }
-
-    private void logRequest(HttpExchange exchange) {
-        LOG.info("Petición entrante: {} {}", exchange.getRequestMethod(), exchange.getRequestURI());
-    }
-
-    private int extractId(HttpExchange exchange) {
-        String p = exchange.getRequestURI().getPath();
-        String idStr = p.substring(p.lastIndexOf('/') + 1);
-        try {
-            return Integer.parseInt(idStr);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("ID inválido: " + idStr, e);
-        }
-    }
-
-    private void sendJson(HttpExchange exchange, int code, Object payload) {
-        try {
-            byte[] b = JSON.writeValueAsString(payload).getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
-            exchange.sendResponseHeaders(code, b.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(b);
-            }
-            LOG.debug("Respondido {} con {} bytes", code, b.length);
+            APIGatewayProxyRequestEvent event = MAPPER.readValue(input, APIGatewayProxyRequestEvent.class);
+            response = route(event);
         } catch (Exception e) {
-            LOG.error("Error enviando JSON:", e);
+            response = new APIGatewayProxyResponseEvent()
+                    .withStatusCode(500)
+                    .withHeaders(Map.of("Content-Type", "application/json"))
+                    .withBody("{\"error\":\"" + e.getMessage() + "\"}");
+        }
+        output.write(MAPPER.writeValueAsBytes(response));
+    }
+
+    private APIGatewayProxyResponseEvent route(APIGatewayProxyRequestEvent event) throws IOException {
+        String method = event.getHttpMethod();
+        String path   = event.getPath();
+        String body   = event.getBody();
+        Map<String,String> headers = Map.of("Content-Type", "application/json");
+
+        // POST /employees
+        if ("POST".equals(method) && "/employees".equals(path)) {
+            Employee in = MAPPER.readValue(body, Employee.class);
+            int newId = service.create(in);
+            in.setId(newId);
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(201)
+                    .withHeaders(headers)
+                    .withBody(MAPPER.writeValueAsString(in));
+        }
+
+        // GET /employees
+        if ("GET".equals(method) && "/employees".equals(path)) {
+            List<Employee> all = service.findAll();
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(200)
+                    .withHeaders(headers)
+                    .withBody(MAPPER.writeValueAsString(all));
+        }
+
+        // GET /employees/salary/top
+        if ("GET".equals(method) && "/employees/salary/top".equals(path)) {
+            List<?> top = service.top10EmployeesBySalary();
+            return new APIGatewayProxyResponseEvent()
+                    .withStatusCode(200)
+                    .withHeaders(headers)
+                    .withBody(MAPPER.writeValueAsString(top));
+        }
+
+        // Rutas con ID
+        if (path != null && path.startsWith("/employees/")) {
+            String[] parts = path.split("/");
+            if (parts.length == 3) {
+                try {
+                    int id = Integer.parseInt(parts[2]);
+                    if ("GET".equals(method)) {
+                        Optional<Employee> f = service.getEmployeeById(id);
+                        return f.map(emp -> {
+                                    try {
+                                        return new APIGatewayProxyResponseEvent()
+                                                        .withStatusCode(200)
+                                                        .withHeaders(headers)
+                                                        .withBody(MAPPER.writeValueAsString(emp));
+                                    } catch (JsonProcessingException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                })
+                                .orElseGet(() -> new APIGatewayProxyResponseEvent()
+                                        .withStatusCode(404)
+                                        .withHeaders(headers)
+                                        .withBody("{\"error\":\"Not Found\"}"));
+                    }
+                    if ("PUT".equals(method)) {
+                        Employee in = MAPPER.readValue(body, Employee.class);
+                        in.setId(id);
+                        boolean ok = service.update(in);
+                        if (ok) {
+                            // 204 No Content, sin body
+                            return new APIGatewayProxyResponseEvent()
+                                    .withStatusCode(204)
+                                    .withHeaders(headers);
+                        } else {
+                            // 404 si no existe
+                            return new APIGatewayProxyResponseEvent()
+                                    .withStatusCode(404)
+                                    .withHeaders(headers)
+                                    .withBody("{\"error\":\"Employee not found\"}");
+                        }
+                    }
+
+                    if ("DELETE".equals(method)) {
+                        boolean ok = service.delete(id);
+                        return new APIGatewayProxyResponseEvent()
+                                .withStatusCode(ok ? 204 : 404)
+                                .withHeaders(headers);
+                    }
+                } catch (NumberFormatException ex) {
+                    return new APIGatewayProxyResponseEvent()
+                            .withStatusCode(400)
+                            .withHeaders(headers)
+                            .withBody("{\"error\":\"Invalid ID\"}");
+                }
+            }
+        }
+
+        return new APIGatewayProxyResponseEvent()
+                .withStatusCode(404)
+                .withHeaders(headers)
+                .withBody("{\"error\":\"Not Found\"}");
+    }
+
+    // ====================================
+    // Arranque local embebido con HttpServer
+    // ====================================
+
+    public void startLocal(int port) throws IOException {
+        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        HttpHandler handler = this::handleExchange;
+        server.createContext("/employees", handler);
+        server.createContext("/employees/salary/top", handler);
+        server.createContext("/employees/", handler);
+        server.setExecutor(Executors.newFixedThreadPool(4));
+        server.start();
+        System.out.println("Servidor arrancado en http://localhost:" + port);
+    }
+
+    private void handleExchange(HttpExchange exch) throws IOException {
+        try {
+            // Construir un mini-request con path, method y body
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            exch.getRequestBody().transferTo(baos);
+            APIGatewayProxyRequestEvent event = new APIGatewayProxyRequestEvent()
+                    .withHttpMethod(exch.getRequestMethod())
+                    .withPath(exch.getRequestURI().getPath())
+                    .withBody(baos.toString(StandardCharsets.UTF_8));
+
+            APIGatewayProxyResponseEvent resp = route(event);
+
+            exch.getResponseHeaders().add("Content-Type", "application/json");
+            String jsonBody = resp.getBody() != null ? resp.getBody() : "";
+            byte[] bytes = jsonBody.getBytes(StandardCharsets.UTF_8);
+            exch.sendResponseHeaders(resp.getStatusCode(), bytes.length);
+            try (OutputStream os = exch.getResponseBody()) {
+                os.write(bytes);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            String err = "{\"error\":\"" + e.getMessage().replace("\"","'") + "\"}";
+            byte[] bytes = err.getBytes(StandardCharsets.UTF_8);
+            exch.getResponseHeaders().add("Content-Type", "application/json");
+            exch.sendResponseHeaders(500, bytes.length);
+            try (OutputStream os = exch.getResponseBody()) {
+                os.write(bytes);
+            }
+        } finally {
+            exch.close();
         }
     }
 
-    private class EmployeesHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) {
-            logRequest(exchange);
-            try {
-                switch (exchange.getRequestMethod()) {
-                    case "GET" -> sendJson(exchange, 200, service.findAll());
-                    case "POST" -> {
-                        Employee e = JSON.readValue(exchange.getRequestBody(), Employee.class);
-                        int id = service.create(e);
-                        sendJson(exchange, 201, Map.of("id", id));
-                    }
-                    case "PUT" -> {
-                        Employee e = JSON.readValue(exchange.getRequestBody(), Employee.class);
-                        e.setId(extractId(exchange));
-                        service.update(e);
-                        sendJson(exchange, 204, "");
-                    }
-                    case "DELETE" -> {
-                        service.delete(extractId(exchange));
-                        sendJson(exchange, 204, "");
-                    }
-                    default -> sendJson(exchange, 405, Map.of("error", "Método no permitido"));
-                }
-            } catch (IllegalArgumentException iae) {
-                LOG.warn("Validación fallida: {}", iae.getMessage(), iae);
-                sendJson(exchange, 400, Map.of("error", iae.getMessage()));
-            } catch (Exception e) {
-                LOG.error("Error procesando petición:", e);
-                sendJson(exchange, 500, Map.of("error", "Error interno del servidor"));
-            } finally {
-                exchange.close();
-            }
-        }
-    }
-
-    private class TopSalaryHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) {
-            logRequest(exchange);
-            try {
-                if (!"GET".equals(exchange.getRequestMethod())) {
-                    sendJson(exchange, 405, Map.of("error", "Método no permitido"));
-                    return;
-                }
-                sendJson(exchange, 200, service.top10Salaries());
-            } catch (Exception e) {
-                LOG.error("Error procesando top10Salaries:", e);
-                sendJson(exchange, 500, Map.of("error", "Error interno del servidor"));
-            } finally {
-                exchange.close();
-            }
-        }
+    public static void main(String[] args) throws IOException {
+        new EmployeeApiServer().startLocal(8080);
     }
 }

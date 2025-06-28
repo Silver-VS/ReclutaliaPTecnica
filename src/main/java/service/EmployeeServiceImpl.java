@@ -1,43 +1,21 @@
-/*
- * EmployeeServiceImpl.java
- * ---------------------------------------------------------------------------
- * Copyright © 2025 Silver VS
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
- * ---------------------------------------------------------------------------
- */
-
 package service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import model.Employee;
 import model.EmployeeDAO;
+import model.EmployeeDAOImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.io.InputStream;
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
-import java.util.Optional;
 
 /**
  * Implementación de {@link EmployeeService} que aplica reglas de negocio
@@ -48,33 +26,35 @@ import java.util.Optional;
  * </p>
  *
  * @author Silver VS
- * @version 1.0
+ * @version 1.1
  * @since 2025-06-27
  */
 public class EmployeeServiceImpl implements EmployeeService {
 
     private static final Logger LOG = LoggerFactory.getLogger(EmployeeServiceImpl.class);
-    private final EmployeeDAO dao;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final EmployeeDAOImpl dao;
+    private final ObjectMapper mapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);;
 
     /**
-     * Constructor que recibe la implementación del DAO.
+     * Construye el servicio con la implementación de DAO proporcionada.
      *
-     * @param dao implementación de acceso a datos
+     * @param dao instancia de acceso a datos
      */
-    public EmployeeServiceImpl(EmployeeDAO dao) {
+    public EmployeeServiceImpl(EmployeeDAOImpl dao) {
         this.dao = dao;
     }
 
     @Override
     public int create(Employee employee) {
-        validateEmployee(employee);
-        LOG.info("Creando empleado: {} {}", employee.getFirstName(), employee.getLastName());
+        validateEmployee(employee, false);
+        LOG.info("Creando empleado: {}", employee.getName());
         return dao.createEmployee(employee);
     }
 
     @Override
-    public Optional<Employee> findById(int id) {
+    public Optional<Employee> getEmployeeById(int id) {
         if (id <= 0) throw new IllegalArgumentException("ID inválido");
         return dao.getEmployeeById(id);
     }
@@ -87,50 +67,90 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Override
     public boolean update(Employee employee) {
         if (employee.getId() <= 0) throw new IllegalArgumentException("ID inválido");
-        validateEmployee(employee);
+        validateEmployee(employee, true);
+        LOG.info("Actualizando empleado ID {}: {}", employee.getId(), employee.getName());
         return dao.updateEmployee(employee);
     }
 
     @Override
     public boolean delete(int id) {
         if (id <= 0) throw new IllegalArgumentException("ID inválido");
+        LOG.info("Eliminando empleado ID {}", id);
         return dao.deleteEmployee(id);
     }
 
     @Override
-    public List<BigDecimal> top10Salaries() {
-        List<BigDecimal> all = new ArrayList<>();
-        String[] files = {"employees_data1.json", "employees_data2.json", "employees_data3.json"};
-        for (String file : files) {
-            try (InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream("json/" + file)) {
-                if (is == null) throw new IllegalStateException("Recurso no encontrado: " + file);
-                List<BigDecimal> salaries = mapper.readValue(is, new TypeReference<>() {
-                });
-                all.addAll(salaries);
-            } catch (Exception e) {
-                LOG.error("Error leyendo archivo JSON {}", file, e);
-                throw new RuntimeException("Error al procesar salarios", e);
-            }
-        }
+    public List<Employee> top10EmployeesBySalary() {
+        // 1. Configuración del mapper para snake_case y fechas ISO
+        mapper
+                .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .registerModule(new JavaTimeModule());
+
+        String[] files = {
+                "employees_data1.json",
+                "employees_data2.json",
+                "employees_data3.json"
+        };
+
+        // 2. Lectura de cada JSON en paralelo
+        List<CompletableFuture<List<Employee>>> futures = Arrays.stream(files)
+                .map(file -> CompletableFuture.supplyAsync(() -> {
+                    try (InputStream is =
+                                 Thread.currentThread()
+                                         .getContextClassLoader()
+                                         .getResourceAsStream("json/" + file)) {
+                        if (is == null) {
+                            throw new IllegalStateException("Recurso no encontrado: " + file);
+                        }
+                        return mapper.readValue(is, new TypeReference<List<Employee>>() {});
+                    } catch (Exception e) {
+                        LOG.error("Error leyendo JSON {}", file, e);
+                        throw new RuntimeException("Error al procesar salarios", e);
+                    }
+                }))
+                .toList();
+
+        // 3. Combinar resultados y esperar a que terminen
+        List<Employee> all = futures.stream()
+                .map(CompletableFuture::join)
+                .flatMap(List::stream)
+                .toList();
+
+        // 4. Ordenar por salario descendente y devolver los primeros 10
         return all.stream()
-                .sorted(Collections.reverseOrder())
+                .sorted(Comparator.comparing(Employee::getSalary).reversed())
                 .limit(10)
                 .collect(Collectors.toList());
     }
 
+
+
+
     /**
-     * Valida que los datos obligatorios de un empleado sean correctos.
+     * Valida los datos obligatorios de un empleado.
      *
-     * @param e objeto a validar
+     * @param e          empleado a validar
+     * @param requireId  si debe validar que ID > 0 (para update)
      */
-    private void validateEmployee(Employee e) {
-        if (e.getFirstName() == null || e.getFirstName().isBlank())
-            throw new IllegalArgumentException("Nombre es obligatorio");
-        if (e.getLastName() == null || e.getLastName().isBlank())
-            throw new IllegalArgumentException("Apellido es obligatorio");
-        if (e.getEmail() == null || !e.getEmail().contains("@"))
-            throw new IllegalArgumentException("Email inválido");
-        if (e.getSalary() == null || e.getSalary().compareTo(BigDecimal.ZERO) < 0)
-            throw new IllegalArgumentException("Salario inválido");
+    private void validateEmployee(Employee e, boolean requireId) {
+        if (requireId && e.getId() <= 0) {
+            throw new IllegalArgumentException("ID inválido");
+        }
+        if (e.getName() == null || e.getName().isBlank()) {
+            throw new IllegalArgumentException("El nombre es obligatorio");
+        }
+        if (e.getPosition() == null || e.getPosition().isBlank()) {
+            throw new IllegalArgumentException("La posición es obligatoria");
+        }
+        if (e.getDepartment() == null || e.getDepartment().isBlank()) {
+            throw new IllegalArgumentException("El departamento es obligatorio");
+        }
+        if (e.getHire_date() == null) {
+            throw new IllegalArgumentException("La fecha de contratación es obligatoria");
+        }
+        if (e.getSalary() == null || e.getSalary().compareTo(BigDecimal.ZERO) < 0) {
+            throw new IllegalArgumentException("El salario debe ser ≥ 0");
+        }
     }
 }

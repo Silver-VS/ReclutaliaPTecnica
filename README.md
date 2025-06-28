@@ -105,9 +105,4 @@ project-root/
 
 ---
 
-## 6. Paso Inmediato
-Definir y validar el script DDL de la tabla `employees` antes de proceder a la implementación de los stored procedures.
-
----
-
 *26 de junio de 2025*
